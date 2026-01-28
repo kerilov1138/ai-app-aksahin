@@ -1,0 +1,5 @@
+{
+  "name": "İnşaat Maliyet Hesaplayıcı",
+  "description": "Toplam inşaat alanına ve temel tipine göre kaba inşaat metrajlarını ve maliyetlerini hesaplayan profesyonel bir araç.",
+  "requestFramePermissions": []
+}
