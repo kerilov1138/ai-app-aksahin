@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'dart:io';
 
 void main() {
   runApp(const MyApp());
@@ -13,21 +12,22 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'AI Studio Mirror',
       theme: ThemeData(useMaterial3: true),
-      home: const MirrorPage(),
+      home: const Scaffold(
+        body: SafeArea(child: WebViewApp()),
+      ),
     );
   }
 }
 
-class MirrorPage extends StatefulWidget {
-  const MirrorPage({super.key});
+class WebViewApp extends StatefulWidget {
+  const WebViewApp({super.key});
 
   @override
-  State<MirrorPage> createState() => _MirrorPageState();
+  State<WebViewApp> createState() => _WebViewAppState();
 }
 
-class _MirrorPageState extends State<MirrorPage> {
+class _WebViewAppState extends State<WebViewApp> {
   late final WebViewController _controller;
 
   @override
@@ -36,25 +36,11 @@ class _MirrorPageState extends State<MirrorPage> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (int progress) {
-            // Update loading bar.
-          },
-          onPageStarted: (String url) {},
-          onPageFinished: (String url) {},
-          onWebResourceError: (WebResourceError error) {},
-        ),
-      )
-      ..loadFlutterAsset('assets/index.html');
+      ..loadFlutterAsset('assets/www/index.html');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: WebViewWidget(controller: _controller),
-      ),
-    );
+    return WebViewWidget(controller: _controller);
   }
 }
