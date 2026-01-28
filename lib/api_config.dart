@@ -1,5 +1,1 @@
-class ApiConfig {
-  static const String apiKey = "YOUR_API_KEY";
-  static const String modelName = "gemini-1.5-flash";
-  static const String systemInstruction = "You are a helpful assistant.";
-}
+class ApiConfig { static const String apiKey = 'YOUR_API_KEY'; static const String modelName = 'gemini-1.5-flash'; static const String systemInstruction = r'''You are a helpful assistant.'''; }
