@@ -14,6 +14,10 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+      - name: Initialize Flutter Project
+        run: |
+          flutter create . --platforms=android --org com.aistudio.app
+          rm -rf test # Remove default test folder
       - run: flutter pub get
       - run: flutter build apk --release
       
