@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'dart:async';
 
@@ -32,7 +33,7 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   String? _errorMessage;
   bool _isLoading = true;
-  late final WebViewController _controller;
+  WebViewController? _controller;
 
   @override
   void initState() {
@@ -42,9 +43,10 @@ class _MainContainerState extends State<MainContainer> {
 
   Future<void> _initWebView() async {
     try {
-      _controller = WebViewController()
+      final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0x00000000))
+        ..setBackgroundColor(const Color(0x33000000))
+        ..enableZoom(true) // Helpful for responsive web content
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
@@ -54,16 +56,31 @@ class _MainContainerState extends State<MainContainer> {
               }
             },
             onWebResourceError: (error) {
-              _showError("Web Resource Error: ${error.description}");
+              // Log specific error codes for debugging
+              _showError("Web Resource Error: ${error.description}\nCode: ${error.errorCode}\nType: ${error.errorType}\nURL: ${error.url}");
             },
           ),
         );
 
-      await _controller.loadFlutterAsset('assets/www/index.html');
+      // CRITICAL FIX: Ensure file access is allowed for Android
+      // This helps with ERR_ACCESS_DENIED on some devices
+      if (controller.platform is AndroidWebViewController) {
+        (controller.platform as AndroidWebViewController).setAllowFileAccess(true);
+        (controller.platform as AndroidWebViewController).setAllowContentAccess(true);
+      }
+
+      // We load assets/www/index.html which is our fixed entry point
+      await controller.loadFlutterAsset('assets/www/index.html');
+      
+      if (mounted) {
+        setState(() {
+          _controller = controller;
+        });
+      }
       
       // Auto-remove splash if it takes too long but no error reported yet
-      Timer(const Duration(seconds: 5), () {
-        if (_isLoading && mounted) {
+      Timer(const Duration(seconds: 8), () {
+        if (_isLoading && mounted && _errorMessage == null) {
            FlutterNativeSplash.remove();
         }
       });
@@ -90,25 +107,29 @@ class _MainContainerState extends State<MainContainer> {
         appBar: AppBar(title: const Text("Diagnostic Tool")),
         body: Container(
           padding: const EdgeInsets.all(16),
-          color: Colors.black87,
+          color: Colors.black,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 30),
+                  Icon(Icons.report_problem, color: Colors.redAccent, size: 30),
                   SizedBox(width: 10),
-                  Text("Error Detected", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.orange)),
+                  Text("Critical Error", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.redAccent)),
                 ],
               ),
               const SizedBox(height: 20),
-              const Text("App failed to load localized assets. Details:", style: TextStyle(color: Colors.white70)),
+              const Text("The application could not load its core files. This usually happens if the entry file is missing or permissions are restricted.", style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 10),
               Expanded(
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    _errorMessage!,
-                    style: const TextStyle(fontFamily: 'monospace', color: Colors.redAccent, fontSize: 13),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(8)),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      _errorMessage!,
+                      style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 12),
+                    ),
                   ),
                 ),
               ),
@@ -116,9 +137,17 @@ class _MainContainerState extends State<MainContainer> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () => _initWebView(),
+                  onPressed: () {
+                    setState(() {
+                      _errorMessage = null;
+                      _isLoading = true;
+                      _controller = null; 
+                    });
+                    _initWebView();
+                  },
                   icon: const Icon(Icons.refresh),
-                  label: const Text("Try Again"),
+                  label: const Text("Restart & Try Again"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey[800], foregroundColor: Colors.white),
                 ),
               )
             ],
@@ -128,12 +157,22 @@ class _MainContainerState extends State<MainContainer> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            WebViewWidget(controller: _controller),
+            if (_controller != null) WebViewWidget(controller: _controller!),
             if (_isLoading)
-              const Center(child: CircularProgressIndicator()),
+              const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 15),
+                    Text("Loading interactive mirror...", style: TextStyle(color: Colors.white54)),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
