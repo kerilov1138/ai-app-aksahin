@@ -1,8 +1,5 @@
-import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:flutter_native_splash/flutter_native_splash.dart';
-import 'dart:async';
+import 'package:flutter/services.dart' show rootBundle;
+import 'dart:io';
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -34,19 +31,25 @@ class _MainContainerState extends State<MainContainer> {
   String? _errorMessage;
   bool _isLoading = true;
   WebViewController? _controller;
+  HttpServer? _server;
+  final int _port = 8080;
 
   @override
   void initState() {
     super.initState();
-    _initWebView();
+    _startServerAndLoad();
   }
 
-  Future<void> _initWebView() async {
+  Future<void> _startServerAndLoad() async {
     try {
+      // 1. Start Local Asset Server
+      await _startLocalServer();
+
+      // 2. Initialize WebView
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(const Color(0x33000000))
-        ..enableZoom(true) // Helpful for responsive web content
+        ..enableZoom(true)
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
@@ -56,21 +59,21 @@ class _MainContainerState extends State<MainContainer> {
               }
             },
             onWebResourceError: (error) {
-              // Log specific error codes for debugging
-              _showError("Web Resource Error: ${error.description}\nCode: ${error.errorCode}\nType: ${error.errorType}\nURL: ${error.url}");
+              // Only report "Critical" errors to user
+              if (error.errorCode == -1 || error.description.contains("denied")) {
+                 _showError("Web Content Error: ${error.description}\nCode: ${error.errorCode}\nURL: ${error.url}");
+              }
             },
           ),
         );
 
-      // CRITICAL FIX: Ensure file access is allowed for Android
-      // This helps with ERR_ACCESS_DENIED on some devices
       if (controller.platform is AndroidWebViewController) {
         (controller.platform as AndroidWebViewController).setAllowFileAccess(true);
         (controller.platform as AndroidWebViewController).setAllowContentAccess(true);
       }
 
-      // We load assets/www/index.html which is our fixed entry point
-      await controller.loadFlutterAsset('assets/www/index.html');
+      // 3. Load from LOCALHOST (fixes absolute paths)
+      await controller.loadRequest(Uri.parse('http://localhost:$_port/index.html'));
       
       if (mounted) {
         setState(() {
@@ -78,15 +81,47 @@ class _MainContainerState extends State<MainContainer> {
         });
       }
       
-      // Auto-remove splash if it takes too long but no error reported yet
-      Timer(const Duration(seconds: 8), () {
+      Timer(const Duration(seconds: 10), () {
         if (_isLoading && mounted && _errorMessage == null) {
            FlutterNativeSplash.remove();
         }
       });
 
     } catch (e, stack) {
-      _showError("Initialization Error: $e\n\nStacktrace:\n$stack");
+      _showError("Startup Error: $e\n\nStacktrace:\n$stack");
+    }
+  }
+
+  Future<void> _startLocalServer() async {
+    if (_server != null) return;
+    try {
+      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
+      _server!.listen((HttpRequest request) async {
+        try {
+          String path = request.uri.path == '/' ? '/index.html' : request.uri.path;
+          String assetPath = 'assets/www$path';
+          
+          final content = await rootBundle.load(assetPath);
+          final bytes = content.buffer.asUint8List();
+          
+          // Set content type
+          if (path.endsWith('.html')) request.response.headers.contentType = ContentType.html;
+          else if (path.endsWith('.js')) request.response.headers.contentType = ContentType.parse('application/javascript');
+          else if (path.endsWith('.css')) request.response.headers.contentType = ContentType.parse('text/css');
+          else if (path.endsWith('.png')) request.response.headers.contentType = ContentType.parse('image/png');
+          else if (path.endsWith('.jpg')) request.response.headers.contentType = ContentType.parse('image/jpeg');
+          
+          request.response.add(bytes);
+        } catch (e) {
+          request.response.statusCode = HttpStatus.notFound;
+          request.response.write("File not found: ${request.uri.path}");
+        } finally {
+          await request.response.close();
+        }
+      });
+    } catch (e) {
+      debugPrint("Server Error: $e");
+      rethrow;
     }
   }
 
@@ -101,53 +136,61 @@ class _MainContainerState extends State<MainContainer> {
   }
 
   @override
+  void dispose() {
+    _server?.close();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_errorMessage != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text("Diagnostic Tool")),
-        body: Container(
-          padding: const EdgeInsets.all(16),
-          color: Colors.black,
+        backgroundColor: Colors.black,
+        appBar: AppBar(title: const Text("Diagnostic Tool"), backgroundColor: Colors.black, foregroundColor: Colors.white),
+        body: Padding(
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Row(
                 children: [
-                  Icon(Icons.report_problem, color: Colors.redAccent, size: 30),
-                  SizedBox(width: 10),
-                  Text("Critical Error", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                  Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 35),
+                  SizedBox(width: 15),
+                  Text("Content Restricted", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.redAccent)),
                 ],
               ),
               const SizedBox(height: 20),
-              const Text("The application could not load its core files. This usually happens if the entry file is missing or permissions are restricted.", style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 10),
+              const Text("The app encountered an error while loading internal components. This usually means the source code uses complex references.", style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 15),
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(8)),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Color(0xFF121212), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white12)),
                   child: SingleChildScrollView(
                     child: SelectableText(
                       _errorMessage!,
-                      style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 12),
+                      style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 13),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 30),
               SizedBox(
                 width: double.infinity,
+                height: 55,
                 child: ElevatedButton.icon(
                   onPressed: () {
                     setState(() {
                       _errorMessage = null;
                       _isLoading = true;
-                      _controller = null; 
+                      _controller = null;
                     });
-                    _initWebView();
+                    _startServerAndLoad();
                   },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("Restart & Try Again"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey[800], foregroundColor: Colors.white),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text("REBOOT APP", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF2C2C2C), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 ),
               )
             ],
@@ -167,9 +210,9 @@ class _MainContainerState extends State<MainContainer> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 15),
-                    Text("Loading interactive mirror...", style: TextStyle(color: Colors.white54)),
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 25),
+                    Text("Syncing Mirror...", style: TextStyle(color: Colors.white54, letterSpacing: 1.5, fontSize: 13)),
                   ],
                 ),
               ),
