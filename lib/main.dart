@@ -1,4 +1,9 @@
+import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'dart:async';
 import 'dart:io';
 
 void main() {
@@ -106,15 +111,18 @@ class _MainContainerState extends State<MainContainer> {
           
           // Set content type
           if (path.endsWith('.html')) request.response.headers.contentType = ContentType.html;
-          else if (path.endsWith('.js')) request.response.headers.contentType = ContentType.parse('application/javascript');
+          else if (path.endsWith('.js') || path.endsWith('.tsx')) request.response.headers.contentType = ContentType.parse('application/javascript');
           else if (path.endsWith('.css')) request.response.headers.contentType = ContentType.parse('text/css');
+          else if (path.endsWith('.json')) request.response.headers.contentType = ContentType.parse('application/json');
+          else if (path.endsWith('.svg')) request.response.headers.contentType = ContentType.parse('image/svg+xml');
           else if (path.endsWith('.png')) request.response.headers.contentType = ContentType.parse('image/png');
-          else if (path.endsWith('.jpg')) request.response.headers.contentType = ContentType.parse('image/jpeg');
+          else if (path.endsWith('.jpg') || path.endsWith('.jpeg')) request.response.headers.contentType = ContentType.parse('image/jpeg');
           
           request.response.add(bytes);
         } catch (e) {
+          debugPrint("Server handling error for ${request.uri.path}: $e");
           request.response.statusCode = HttpStatus.notFound;
-          request.response.write("File not found: ${request.uri.path}");
+          request.response.write("File not found or inaccessible: ${request.uri.path}");
         } finally {
           await request.response.close();
         }
