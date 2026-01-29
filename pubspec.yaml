@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   webview_flutter: ^4.10.0
-  webview_flutter_android: ^3.16.0
+  webview_flutter_android: ^4.10.11
   cupertino_icons: ^1.0.6
   flutter_native_splash: ^2.4.4
 
