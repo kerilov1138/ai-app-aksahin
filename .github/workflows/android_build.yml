@@ -22,6 +22,8 @@ jobs:
           flutter create . --platforms=android --org com.aistudio.app
           rm -rf test # Remove default test folder
       - run: flutter pub get
+      - name: Create Native Splash
+        run: dart run flutter_native_splash:create
       - run: flutter build apk --release
       
       - name: Upload Artifact
