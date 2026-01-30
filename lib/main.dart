@@ -103,8 +103,8 @@ class _MainContainerState extends State<MainContainer> {
         }
       });
 
-      // 5. Load Content (Use 127.0.0.1 to avoid DNS/IPv6 issues)
-      await controller.loadRequest(Uri.parse('http://127.0.0.1:$_port/index.html'));
+      // 5. Load Content Natively (True Offline)
+      await controller.loadFlutterAsset('assets/www/index.html');
       
       if (mounted) {
         setState(() {
@@ -113,60 +113,7 @@ class _MainContainerState extends State<MainContainer> {
       }
 
     } catch (e, stack) {
-      _showError("Startup Failure: $e\n\n$stack");
-    }
-  }
-
-  Future<void> _startLocalServer() async {
-    if (_server != null) return;
-    try {
-      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
-      _server!.listen((HttpRequest request) async {
-        try {
-          // Decode URL to handle spaces/Turkish characters in file names
-          String path = Uri.decodeComponent(request.uri.path);
-          path = path == '/' ? '/index.html' : path;
-          String assetPath = 'assets/www$path';
-          
-          final content = await rootBundle.load(assetPath);
-          final bytes = content.buffer.asUint8List();
-          
-          // Force CORS and proper headers
-          request.response.headers.add('Access-Control-Allow-Origin', '*');
-          request.response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS');
-          request.response.headers.contentLength = bytes.length;
-          
-          // Advanced MIME Mapping
-          String ext = path.split('.').last.toLowerCase();
-          switch (ext) {
-            case 'html': request.response.headers.contentType = ContentType.html; break;
-            case 'js':
-            case 'tsx':
-            case 'jsx': request.response.headers.contentType = ContentType.parse('application/javascript'); break;
-            case 'css': request.response.headers.contentType = ContentType.parse('text/css; charset=utf-8'); break;
-            case 'json': request.response.headers.contentType = ContentType.parse('application/json'); break;
-            case 'svg': request.response.headers.contentType = ContentType.parse('image/svg+xml'); break;
-            case 'png': request.response.headers.contentType = ContentType.parse('image/png'); break;
-            case 'jpg':
-            case 'jpeg': request.response.headers.contentType = ContentType.parse('image/jpeg'); break;
-            case 'gif': request.response.headers.contentType = ContentType.parse('image/gif'); break;
-            case 'webp': request.response.headers.contentType = ContentType.parse('image/webp'); break;
-            case 'woff': request.response.headers.contentType = ContentType.parse('font/woff'); break;
-            case 'woff2': request.response.headers.contentType = ContentType.parse('font/woff2'); break;
-            case 'ttf': request.response.headers.contentType = ContentType.parse('font/ttf'); break;
-          }
-          
-          request.response.add(bytes);
-        } catch (e) {
-          debugPrint("Server Error [${request.uri.path}]: $e");
-          request.response.statusCode = HttpStatus.notFound;
-          request.response.write("Resource not found: ${request.uri.path}");
-        } finally {
-          await request.response.close();
-        }
-      });
-    } catch (e) {
-      rethrow;
+      _showError("FileSystem Failure: $e\n\n$stack");
     }
   }
 
