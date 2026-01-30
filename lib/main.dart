@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'dart:async';
 import 'dart:io';
@@ -19,7 +20,15 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: Colors.black,
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.white,
+          surface: Color(0xFF121212),
+        ),
+      ),
       home: const MainContainer(),
     );
   }
@@ -38,46 +47,63 @@ class _MainContainerState extends State<MainContainer> {
   WebViewController? _controller;
   HttpServer? _server;
   final int _port = 8080;
+  Timer? _failsafeTimer;
 
   @override
   void initState() {
     super.initState();
-    _startServerAndLoad();
+    _initializeApp();
   }
 
-  Future<void> _startServerAndLoad() async {
+  Future<void> _initializeApp() async {
     try {
-      // 1. Start Local Asset Server
+      // 1. Request Essential Permissions
+      await [
+        Permission.storage,
+        Permission.camera,
+        Permission.microphone,
+      ].request();
+
+      // 2. Start Local Asset Server
       await _startLocalServer();
 
-      // 2. Initialize WebView
+      // 3. Initialize WebView
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0x33000000))
+        ..setBackgroundColor(Colors.black)
         ..enableZoom(true)
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
               if (mounted) {
                 setState(() => _isLoading = false);
+                _failsafeTimer?.cancel();
                 FlutterNativeSplash.remove();
               }
             },
             onWebResourceError: (error) {
-              // Only report "Critical" errors to user
+              // Ignore harmless errors, only report major ones
               if (error.errorCode == -1 || error.description.contains("denied")) {
-                 _showError("Web Content Error: ${error.description}\nCode: ${error.errorCode}\nURL: ${error.url}");
+                _showError("Render Error: ${error.description}\nURL: ${error.url}");
               }
             },
           ),
         );
 
       if (controller.platform is AndroidWebViewController) {
+        AndroidWebViewController.enableDebugging(false);
         (controller.platform as AndroidWebViewController).setAllowFileAccess(true);
         (controller.platform as AndroidWebViewController).setAllowContentAccess(true);
       }
 
-      // 3. Load from LOCALHOST (fixes absolute paths)
+      // 4. Start Failsafe Timer (15 seconds)
+      _failsafeTimer = Timer(const Duration(seconds: 15), () {
+        if (_isLoading && mounted && _errorMessage == null) {
+          _showError("Initialization Timeout: The app is taking too long to load. This might be due to complex assets or a missing entry file.");
+        }
+      });
+
+      // 5. Load Content
       await controller.loadRequest(Uri.parse('http://localhost:$_port/index.html'));
       
       if (mounted) {
@@ -85,15 +111,9 @@ class _MainContainerState extends State<MainContainer> {
           _controller = controller;
         });
       }
-      
-      Timer(const Duration(seconds: 10), () {
-        if (_isLoading && mounted && _errorMessage == null) {
-           FlutterNativeSplash.remove();
-        }
-      });
 
     } catch (e, stack) {
-      _showError("Startup Error: $e\n\nStacktrace:\n$stack");
+      _showError("Startup Failure: $e\n\n$stack");
     }
   }
 
@@ -109,26 +129,35 @@ class _MainContainerState extends State<MainContainer> {
           final content = await rootBundle.load(assetPath);
           final bytes = content.buffer.asUint8List();
           
-          // Set content type
-          if (path.endsWith('.html')) request.response.headers.contentType = ContentType.html;
-          else if (path.endsWith('.js') || path.endsWith('.tsx')) request.response.headers.contentType = ContentType.parse('application/javascript');
-          else if (path.endsWith('.css')) request.response.headers.contentType = ContentType.parse('text/css');
-          else if (path.endsWith('.json')) request.response.headers.contentType = ContentType.parse('application/json');
-          else if (path.endsWith('.svg')) request.response.headers.contentType = ContentType.parse('image/svg+xml');
-          else if (path.endsWith('.png')) request.response.headers.contentType = ContentType.parse('image/png');
-          else if (path.endsWith('.jpg') || path.endsWith('.jpeg')) request.response.headers.contentType = ContentType.parse('image/jpeg');
+          // Advanced MIME Mapping
+          String ext = path.split('.').last.toLowerCase();
+          switch (ext) {
+            case 'html': request.response.headers.contentType = ContentType.html; break;
+            case 'js':
+            case 'tsx':
+            case 'jsx': request.response.headers.contentType = ContentType.parse('application/javascript'); break;
+            case 'css': request.response.headers.contentType = ContentType.parse('text/css'); break;
+            case 'json': request.response.headers.contentType = ContentType.parse('application/json'); break;
+            case 'svg': request.response.headers.contentType = ContentType.parse('image/svg+xml'); break;
+            case 'png': request.response.headers.contentType = ContentType.parse('image/png'); break;
+            case 'jpg':
+            case 'jpeg': request.response.headers.contentType = ContentType.parse('image/jpeg'); break;
+            case 'gif': request.response.headers.contentType = ContentType.parse('image/gif'); break;
+            case 'webp': request.response.headers.contentType = ContentType.parse('image/webp'); break;
+            case 'woff': request.response.headers.contentType = ContentType.parse('font/woff'); break;
+            case 'woff2': request.response.headers.contentType = ContentType.parse('font/woff2'); break;
+            case 'ttf': request.response.headers.contentType = ContentType.parse('font/ttf'); break;
+          }
           
           request.response.add(bytes);
         } catch (e) {
-          debugPrint("Server handling error for ${request.uri.path}: $e");
           request.response.statusCode = HttpStatus.notFound;
-          request.response.write("File not found or inaccessible: ${request.uri.path}");
+          request.response.write("Resource not found");
         } finally {
           await request.response.close();
         }
       });
     } catch (e) {
-      debugPrint("Server Error: $e");
       rethrow;
     }
   }
@@ -139,12 +168,14 @@ class _MainContainerState extends State<MainContainer> {
         _errorMessage = message;
         _isLoading = false;
       });
+      _failsafeTimer?.cancel();
       FlutterNativeSplash.remove();
     }
   }
 
   @override
   void dispose() {
+    _failsafeTimer?.cancel();
     _server?.close();
     super.dispose();
   }
@@ -153,40 +184,53 @@ class _MainContainerState extends State<MainContainer> {
   Widget build(BuildContext context) {
     if (_errorMessage != null) {
       return Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(title: const Text("Diagnostic Tool"), backgroundColor: Colors.black, foregroundColor: Colors.white),
+        appBar: AppBar(
+          title: const Text("Diagnostic Console"),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
         body: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 35),
-                  SizedBox(width: 15),
-                  Text("Content Restricted", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                ],
+              const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                "Loading Failure",
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 20),
-              const Text("The app encountered an error while loading internal components. This usually means the source code uses complex references.", style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 15),
+              const SizedBox(height: 8),
+              const Text(
+                "The application was unable to render the mirrored content. This is usually due to missing files in the uploaded ZIP or code that requires a full browser environment.",
+                style: TextStyle(color: Colors.white60, height: 1.4),
+              ),
+              const SizedBox(height: 24),
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Color(0xFF121212), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white12)),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white10),
+                  ),
                   child: SingleChildScrollView(
                     child: SelectableText(
                       _errorMessage!,
-                      style: const TextStyle(fontFamily: 'monospace', color: Colors.greenAccent, fontSize: 13),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: Colors.orangeAccent,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
-                height: 55,
+                height: 56,
                 child: ElevatedButton.icon(
                   onPressed: () {
                     setState(() {
@@ -194,11 +238,15 @@ class _MainContainerState extends State<MainContainer> {
                       _isLoading = true;
                       _controller = null;
                     });
-                    _startServerAndLoad();
+                    _initializeApp();
                   },
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text("REBOOT APP", style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-                  style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF2C2C2C), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  label: const Text("REBOOT ENGINE"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               )
             ],
@@ -208,20 +256,30 @@ class _MainContainerState extends State<MainContainer> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
             if (_controller != null) WebViewWidget(controller: _controller!),
             if (_isLoading)
-              const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 25),
-                    Text("Syncing Mirror...", style: TextStyle(color: Colors.white54, letterSpacing: 1.5, fontSize: 13)),
-                  ],
+              Container(
+                color: Colors.black,
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                      SizedBox(height: 24),
+                      Text(
+                        "PREPARING MIRROR...",
+                        style: TextStyle(
+                          color: Colors.white38,
+                          letterSpacing: 2,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
