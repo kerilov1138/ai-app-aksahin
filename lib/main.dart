@@ -103,8 +103,8 @@ class _MainContainerState extends State<MainContainer> {
         }
       });
 
-      // 5. Load Content
-      await controller.loadRequest(Uri.parse('http://localhost:$_port/index.html'));
+      // 5. Load Content (Use 127.0.0.1 to avoid DNS/IPv6 issues)
+      await controller.loadRequest(Uri.parse('http://127.0.0.1:$_port/index.html'));
       
       if (mounted) {
         setState(() {
@@ -123,11 +123,18 @@ class _MainContainerState extends State<MainContainer> {
       _server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port);
       _server!.listen((HttpRequest request) async {
         try {
-          String path = request.uri.path == '/' ? '/index.html' : request.uri.path;
+          // Decode URL to handle spaces/Turkish characters in file names
+          String path = Uri.decodeComponent(request.uri.path);
+          path = path == '/' ? '/index.html' : path;
           String assetPath = 'assets/www$path';
           
           final content = await rootBundle.load(assetPath);
           final bytes = content.buffer.asUint8List();
+          
+          // Force CORS and proper headers
+          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          request.response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS');
+          request.response.headers.contentLength = bytes.length;
           
           // Advanced MIME Mapping
           String ext = path.split('.').last.toLowerCase();
@@ -136,7 +143,7 @@ class _MainContainerState extends State<MainContainer> {
             case 'js':
             case 'tsx':
             case 'jsx': request.response.headers.contentType = ContentType.parse('application/javascript'); break;
-            case 'css': request.response.headers.contentType = ContentType.parse('text/css'); break;
+            case 'css': request.response.headers.contentType = ContentType.parse('text/css; charset=utf-8'); break;
             case 'json': request.response.headers.contentType = ContentType.parse('application/json'); break;
             case 'svg': request.response.headers.contentType = ContentType.parse('image/svg+xml'); break;
             case 'png': request.response.headers.contentType = ContentType.parse('image/png'); break;
@@ -151,8 +158,9 @@ class _MainContainerState extends State<MainContainer> {
           
           request.response.add(bytes);
         } catch (e) {
+          debugPrint("Server Error [${request.uri.path}]: $e");
           request.response.statusCode = HttpStatus.notFound;
-          request.response.write("Resource not found");
+          request.response.write("Resource not found: ${request.uri.path}");
         } finally {
           await request.response.close();
         }
