@@ -44,6 +44,7 @@ class MainContainer extends StatefulWidget {
 class _MainContainerState extends State<MainContainer> {
   String? _errorMessage;
   bool _isLoading = true;
+  WebViewController? _controller;
   HttpServer? _server;
   int _port = 0; // Will be assigned dynamically
   Timer? _failsafeTimer;
