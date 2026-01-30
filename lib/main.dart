@@ -45,8 +45,6 @@ class _MainContainerState extends State<MainContainer> {
   String? _errorMessage;
   bool _isLoading = true;
   WebViewController? _controller;
-  HttpServer? _server;
-  final int _port = 8080;
   Timer? _failsafeTimer;
 
   @override
@@ -64,10 +62,7 @@ class _MainContainerState extends State<MainContainer> {
         Permission.microphone,
       ].request();
 
-      // 2. Start Local Asset Server
-      await _startLocalServer();
-
-      // 3. Initialize WebView
+      // 2. Initialize WebView
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(Colors.black)
@@ -131,7 +126,6 @@ class _MainContainerState extends State<MainContainer> {
   @override
   void dispose() {
     _failsafeTimer?.cancel();
-    _server?.close();
     super.dispose();
   }
 
