@@ -1,0 +1,5 @@
+{
+  "name": "Debt Asset Calculator",
+  "description": "A financial tracking tool that calculates historical debt values in USD, EUR, and Gold by analyzing monthly exchange rates from a specified start date to the present.",
+  "requestFramePermissions": []
+}
